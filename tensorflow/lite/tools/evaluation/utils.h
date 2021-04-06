@@ -41,6 +41,7 @@ limitations under the License.
 #endif
 
 #include "tensorflow/lite/c/common.h"
+#include "tensorflow/lite/tools/logging.h"
 
 namespace tflite {
 namespace evaluation {
@@ -66,6 +67,18 @@ inline TfLiteStatus GetSortedFileNames(const std::string& directory,
   return GetSortedFileNames(directory, result,
                             std::unordered_set<std::string>());
 }
+
+std::string GetPathFromPath(const std::string& str);
+
+// Get md5 of ground truth images
+std::string GetMD5(const std::string& dir);
+
+std::string GetGroundTruthImagePath(const std::string& dir);
+
+// same as numpy.percentile()
+float GetPercentile(std::vector<float>& data, const int q);
+
+bool DeleteDir(const std::string& dir);
 
 // Returns nullptr on error, e.g. if NNAPI isn't supported on this platform.
 TfLiteDelegatePtr CreateNNAPIDelegate();
