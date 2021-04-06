@@ -40,6 +40,7 @@ cc_library(
     hdrs = ["utils.h"],
     copts = tflite_copts(),
     deps = [
+        "//tensorflow/lite/tools:logging",
         "//tensorflow/lite/c:common",
         "//tensorflow/lite/delegates/nnapi:nnapi_delegate",
     ] + select({

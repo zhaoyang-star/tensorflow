@@ -93,6 +93,59 @@ TfLiteStatus GetSortedFileNames(
 }
 #endif
 
+std::string GetPathFromPath(const std::string& str) {
+  int pos = str.find_last_of("/\\");
+  if (pos == std::string::npos) return "";
+  return str.substr(0, pos + 1);
+}
+
+// Get md5 of ground truth images
+std::string GetMD5(const std::string& dir) {
+  std::string cmd = "md5sum " + dir;
+  FILE* pipe = popen(cmd.c_str(), "r");
+  if (!pipe) {
+    TFLITE_LOG(ERROR) << "Could not get md5 of ground truth images.";
+  }
+  char md5[32];
+  fgets(md5, sizeof(md5), pipe);
+  pclose(pipe);
+  return std::string(md5);
+}
+
+std::string GetGroundTruthImagePath(const std::string& dir) {
+  std::string path = GetPathFromPath(dir);
+  std::string cmd = "unzip " + dir + " -d " + path + " | tail -1 | awk '{print $2}'";
+  FILE* pipe = popen(cmd.c_str(), "r");
+  if (!pipe) {
+    TFLITE_LOG(ERROR) << "Could not unzip ground truth images.";
+  }
+  char ins_path[1024];
+  fgets(ins_path, sizeof(ins_path), pipe);
+  pclose(pipe);
+  return GetPathFromPath(std::string(ins_path));
+}
+
+// same as numpy.percentile()
+float GetPercentile(std::vector<float>& data, const int q) {
+  std::sort(data.begin(), data.end());
+  float pos = (data.size() - 1) * q / 100.f;
+  float pos_floor = floor(pos);
+  float pos_ceil = ceil(pos);
+  float target = data.at(pos_floor) + (data.at(pos_ceil) - data.at(pos_floor)) * (pos - pos_floor);
+  return target;
+}
+
+bool DeleteDir(const std::string& dir) {
+  std::string cmd = "rm -rf " + dir;
+  FILE* pipe = popen(cmd.c_str(), "r");
+  if (!pipe) {
+    TFLITE_LOG(ERROR) << "Could not delete dir: " << dir;
+    return false;
+  }
+  pclose(pipe);
+  return true;
+}
+
 // TODO(b/138448769): Migrate delegate helper APIs to lite/testing.
 TfLiteDelegatePtr CreateNNAPIDelegate() {
 #if defined(__ANDROID__)
