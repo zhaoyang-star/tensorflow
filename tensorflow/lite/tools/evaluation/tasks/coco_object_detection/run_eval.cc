@@ -78,9 +78,10 @@ std::string GetGroundTruthImagePath(const std::string& dir) {
   return GetPathFromPath(std::string(ins_path));
 }
 
-float GetPercentileValue(const int percentile, std::vector<float>& data) {
+// same as numpy.percentile()
+float GetPercentile(std::vector<float>& data, const int q) {
   std::sort(data.begin(), data.end());
-  float pos = (data.size() - 1) * percentile / 100.f;
+  float pos = (data.size() - 1) * q / 100.f;
   float pos_floor = floor(pos);
   float pos_ceil = ceil(pos);
   float target = data.at(pos_floor) + (data.at(pos_ceil) - data.at(pos_floor)) * (pos - pos_floor);
@@ -289,7 +290,7 @@ void CocoObjectDetection::OutputResult(
   std::sort(infer_time.begin(), infer_time.end());
   const auto& inference_latency = object_detection_metrics.inference_latency();
   TFLITE_LOG(INFO) << "90th_percentile_latency: "
-	           << GetPercentileValue(90, infer_time)
+	           << GetPercentile(infer_time, 90)
 		   << "ms, min_latency: " << inference_latency.min_us() * 0.001
                    << "ms, max_latency: " << inference_latency.max_us() * 0.001
                    << "ms";
