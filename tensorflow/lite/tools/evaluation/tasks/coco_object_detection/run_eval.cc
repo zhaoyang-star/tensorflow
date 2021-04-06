@@ -46,6 +46,49 @@ std::string GetNameFromPath(const std::string& str) {
   return str.substr(pos + 1);
 }
 
+std::string GetPathFromPath(const std::string& str) {
+  int pos = str.find_last_of("/\\");
+  if (pos == std::string::npos) return "";
+  return str.substr(0, pos + 1);
+}
+
+// Get md5 of ground truth images
+std::string GetMD5(const std::string dir) {
+  std::string cmd = "md5sum " + dir;
+  FILE* pipe = popen(cmd.c_str(), "r");
+  if (!pipe) {
+    TFLITE_LOG(ERROR) << "Could not get md5 of ground truth images.";
+  }
+  char md5[32];
+  fgets(md5, sizeof(md5), pipe);
+  pclose(pipe);
+  return std::string(md5);
+}
+
+std::string GetGroundTruthImagePath(const std::string& dir) {
+  std::string path = GetPathFromPath(dir);
+  std::string cmd = "unzip " + dir + " -d " + path + " | tail -1 | awk '{print $2}'";
+  FILE* pipe = popen(cmd.c_str(), "r");
+  if (!pipe) {
+    TFLITE_LOG(ERROR) << "Could not unzip ground truth images.";
+  }
+  char ins_path[1024];
+  fgets(ins_path, sizeof(ins_path), pipe);
+  pclose(pipe);
+  return GetPathFromPath(std::string(ins_path));
+}
+
+bool DeleteDir(const std::string dir) {
+  std::string cmd = "rm -rf " + dir;
+  FILE* pipe = popen(cmd.c_str(), "r");
+  if (!pipe) {
+    TFLITE_LOG(ERROR) << "Could not delete dir: " << dir;
+    return false;
+  }
+  pclose(pipe);
+  return true;
+}
+
 class CocoObjectDetection : public TaskExecutor {
  public:
   CocoObjectDetection() : debug_mode_(false), num_interpreter_threads_(1) {}
@@ -58,7 +101,7 @@ class CocoObjectDetection : public TaskExecutor {
   absl::optional<EvaluationStageMetrics> RunImpl() final;
 
  private:
-  void OutputResult(const EvaluationStageMetrics& latest_metrics) const;
+  void OutputResult(const EvaluationStageMetrics& latest_metrics, std::vector<float>& infer_time) const;
   std::string model_file_path_;
   std::string model_output_labels_path_;
   std::string ground_truth_images_path_;
@@ -110,8 +153,15 @@ std::vector<Flag> CocoObjectDetection::GetFlags() {
 
 absl::optional<EvaluationStageMetrics> CocoObjectDetection::RunImpl() {
   // Process images in filename-sorted order.
+  auto dir = StripTrailingSlashes(ground_truth_images_path_);
+
+  std::string md5 = GetMD5(dir);
+  TFLITE_LOG(INFO) << "load_data, checksum: " << md5;
+
+  auto image_dir = GetGroundTruthImagePath(dir);
+
   std::vector<std::string> image_paths;
-  if (GetSortedFileNames(StripTrailingSlashes(ground_truth_images_path_),
+  if (GetSortedFileNames(image_dir,
                          &image_paths) != kTfLiteOk) {
     return absl::nullopt;
   }
@@ -141,16 +191,23 @@ absl::optional<EvaluationStageMetrics> CocoObjectDetection::RunImpl() {
 
   eval.SetAllLabels(model_labels);
   if (eval.Init(&delegate_providers_) != kTfLiteOk) return absl::nullopt;
+  TFLITE_LOG(INFO) << "test_begin";
 
+  std::vector<float> infer_time(image_paths.size());
   const int step = image_paths.size() / 100;
   for (int i = 0; i < image_paths.size(); ++i) {
-    if (step > 1 && i % step == 0) {
+    if (debug_mode_ && step > 1 && i % step == 0) {
       TFLITE_LOG(INFO) << "Finished: " << i / step << "%";
     }
 
     const std::string image_name = GetNameFromPath(image_paths[i]);
     eval.SetInputs(image_paths[i], ground_truth_map[image_name]);
-    if (eval.Run() != kTfLiteOk) return absl::nullopt;
+    if (eval.Run() != kTfLiteOk) {
+      TFLITE_LOG(INFO) << "sampleid: " << image_name << ", result=false";
+      return absl::nullopt;
+    } else {
+      TFLITE_LOG(INFO) << "sampleid: " << image_name << ", result=true";
+    }
 
     if (debug_mode_) {
       ObjectDetectionResult prediction = *eval.GetLatestPrediction();
@@ -174,6 +231,10 @@ absl::optional<EvaluationStageMetrics> CocoObjectDetection::RunImpl() {
       TFLITE_LOG(INFO)
           << "======================================================\n";
     }
+
+    const auto& inference_latency = eval.LatestMetrics().process_metrics().object_detection_metrics().inference_latency();
+    infer_time.at(i) = inference_latency.last_us() * 0.001;
+    TFLITE_LOG(INFO) << "latency_case" << i+1 << "_latency: " << infer_time.at(i) << "ms";
   }
 
   // Write metrics to file.
@@ -185,12 +246,20 @@ absl::optional<EvaluationStageMetrics> CocoObjectDetection::RunImpl() {
         ->clear_average_precision_metrics();
   }
 
-  OutputResult(latest_metrics);
+  OutputResult(latest_metrics, infer_time);
+
+  if (!DeleteDir(image_dir)) {
+    TFLITE_LOG(ERROR) << "Could not delete image_dir: " << image_dir;
+    return absl::nullopt;
+  }
+
+  TFLITE_LOG(INFO) << "test_end";
   return absl::make_optional(latest_metrics);
 }
 
 void CocoObjectDetection::OutputResult(
-    const EvaluationStageMetrics& latest_metrics) const {
+    const EvaluationStageMetrics& latest_metrics,
+    std::vector<float>& infer_time) const {
   if (!output_file_path_.empty()) {
     std::ofstream metrics_ofile;
     metrics_ofile.open(output_file_path_, std::ios::out);
@@ -202,23 +271,30 @@ void CocoObjectDetection::OutputResult(
       latest_metrics.process_metrics().object_detection_metrics();
   const auto& preprocessing_latency =
       object_detection_metrics.pre_processing_latency();
-  TFLITE_LOG(INFO) << "Preprocessing latency: avg="
-                   << preprocessing_latency.avg_us() << "(us), std_dev="
-                   << preprocessing_latency.std_deviation_us() << "(us)";
+  if (debug_mode_) {
+    TFLITE_LOG(INFO) << "Preprocessing latency: avg="
+                     << preprocessing_latency.avg_us() << "(us), std_dev="
+                     << preprocessing_latency.std_deviation_us() << "(us)";
+  }
+  std::sort(infer_time.begin(), infer_time.end(), std::greater<float>());
   const auto& inference_latency = object_detection_metrics.inference_latency();
-  TFLITE_LOG(INFO) << "Inference latency: avg=" << inference_latency.avg_us()
-                   << "(us), std_dev=" << inference_latency.std_deviation_us()
-                   << "(us)";
+  TFLITE_LOG(INFO) << "90th_percentile_latency: "
+	           << infer_time.at(static_cast<size_t>(90 / 100 * latest_metrics.num_runs() + 1))
+		   << "ms, min_latency: " << inference_latency.min_us() * 0.001
+                   << "ms, max_latency: " << inference_latency.max_us() * 0.001
+                   << "ms";
   const auto& precision_metrics =
       object_detection_metrics.average_precision_metrics();
-  for (int i = 0; i < precision_metrics.individual_average_precisions_size();
-       ++i) {
-    const auto ap_metric = precision_metrics.individual_average_precisions(i);
-    TFLITE_LOG(INFO) << "Average Precision [IOU Threshold="
-                     << ap_metric.iou_threshold()
-                     << "]: " << ap_metric.average_precision();
+  if (debug_mode_) {
+    for (int i = 0; i < precision_metrics.individual_average_precisions_size();
+         ++i) {
+      const auto ap_metric = precision_metrics.individual_average_precisions(i);
+      TFLITE_LOG(INFO) << "Average Precision [IOU Threshold="
+                       << ap_metric.iou_threshold()
+                       << "]: " << ap_metric.average_precision();
+    }
   }
-  TFLITE_LOG(INFO) << "Overall mAP: "
+  TFLITE_LOG(INFO) << "total_accuracy: "
                    << precision_metrics.overall_mean_average_precision();
 }
 
