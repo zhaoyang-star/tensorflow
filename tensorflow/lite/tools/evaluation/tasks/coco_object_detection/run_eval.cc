@@ -78,6 +78,15 @@ std::string GetGroundTruthImagePath(const std::string& dir) {
   return GetPathFromPath(std::string(ins_path));
 }
 
+float GetPercentileValue(const int percentile, std::vector<float>& data) {
+  std::sort(data.begin(), data.end());
+  float pos = (data.size() - 1) * percentile / 100.f;
+  float pos_floor = floor(pos);
+  float pos_ceil = ceil(pos);
+  float target = data.at(pos_floor) + (data.at(pos_ceil) - data.at(pos_floor)) * (pos - pos_floor);
+  return target;
+}
+
 bool DeleteDir(const std::string dir) {
   std::string cmd = "rm -rf " + dir;
   FILE* pipe = popen(cmd.c_str(), "r");
@@ -276,10 +285,11 @@ void CocoObjectDetection::OutputResult(
                      << preprocessing_latency.avg_us() << "(us), std_dev="
                      << preprocessing_latency.std_deviation_us() << "(us)";
   }
-  std::sort(infer_time.begin(), infer_time.end(), std::greater<float>());
+
+  std::sort(infer_time.begin(), infer_time.end());
   const auto& inference_latency = object_detection_metrics.inference_latency();
   TFLITE_LOG(INFO) << "90th_percentile_latency: "
-	           << infer_time.at(static_cast<size_t>(90 / 100 * latest_metrics.num_runs() + 1))
+	           << GetPercentileValue(90, infer_time)
 		   << "ms, min_latency: " << inference_latency.min_us() * 0.001
                    << "ms, max_latency: " << inference_latency.max_us() * 0.001
                    << "ms";
