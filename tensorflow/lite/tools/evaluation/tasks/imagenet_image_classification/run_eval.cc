@@ -39,6 +39,8 @@ constexpr char kDenylistFilePathFlag[] = "denylist_file_path";
 constexpr char kNumImagesFlag[] = "num_images";
 constexpr char kInterpreterThreadsFlag[] = "num_interpreter_threads";
 constexpr char kDelegateFlag[] = "delegate";
+constexpr char kTopk[] = "topk";
+constexpr char KDebugMode[] = "debug_mode";
 
 template <typename T>
 std::vector<T> GetFirstN(const std::vector<T>& v, int n) {
@@ -59,7 +61,8 @@ class ImagenetClassification : public TaskExecutor {
   absl::optional<EvaluationStageMetrics> RunImpl() final;
 
  private:
-  void OutputResult(const EvaluationStageMetrics& latest_metrics) const;
+  void OutputResult(const EvaluationStageMetrics& latest_metrics, std::vector<float>& infer_time) const;
+  void OutputResultItem(const EvaluationStageMetrics& latest_metrics, std::string image_name, std::string label) const;
   std::string model_file_path_;
   std::string ground_truth_images_path_;
   std::string ground_truth_labels_path_;
@@ -69,6 +72,8 @@ class ImagenetClassification : public TaskExecutor {
   std::string delegate_;
   int num_images_;
   int num_interpreter_threads_;
+  int topk_{10};
+  int debug_mode_{0};
 };
 
 std::vector<Flag> ImagenetClassification::GetFlags() {
@@ -106,6 +111,12 @@ std::vector<Flag> ImagenetClassification::GetFlags() {
           kDelegateFlag, &delegate_,
           "Delegate to use for inference, if available. "
           "Must be one of {'nnapi', 'gpu', 'hexagon', 'xnnpack'}"),
+      tflite::Flag::CreateFlag(
+          kTopk, &topk_, "Topk Number"
+      ),
+      tflite::Flag::CreateFlag(
+        KDebugMode, &debug_mode_, "Debug Mode"
+      )
   };
   return flag_list;
 }
@@ -122,7 +133,8 @@ absl::optional<EvaluationStageMetrics> ImagenetClassification::RunImpl() {
     return absl::nullopt;
   }
   if (image_files.size() != ground_truth_image_labels.size()) {
-    TFLITE_LOG(ERROR) << "Number of images and ground truth labels is not same";
+    TFLITE_LOG(ERROR) << "Number of images and ground truth labels is not same, image_files is "
+     << image_files.size() << ", ground_truth_image_labels is " << ground_truth_image_labels.size();
     return absl::nullopt;
   }
   std::vector<ImageLabel> image_labels;
@@ -153,7 +165,7 @@ absl::optional<EvaluationStageMetrics> ImagenetClassification::RunImpl() {
   inference_params->set_model_file_path(model_file_path_);
   inference_params->set_num_threads(num_interpreter_threads_);
   inference_params->set_delegate(ParseStringToDelegateType(delegate_));
-  classification_params->mutable_topk_accuracy_eval_params()->set_k(10);
+  classification_params->mutable_topk_accuracy_eval_params()->set_k(topk_);
 
   ImageClassificationStage eval(eval_config);
 
@@ -161,40 +173,90 @@ absl::optional<EvaluationStageMetrics> ImagenetClassification::RunImpl() {
   if (eval.Init(&delegate_providers_) != kTfLiteOk) return absl::nullopt;
 
   const int step = image_labels.size() / 100;
+  TFLITE_LOG(INFO) << "Test begin";
+  std::vector<float> infer_time(image_labels.size());
   for (int i = 0; i < image_labels.size(); ++i) {
-    if (step > 1 && i % step == 0) {
+    if (debug_mode_ && step > 1 && i % step == 0) {
       TFLITE_LOG(INFO) << "Evaluated: " << i / step << "%";
     }
     eval.SetInputs(image_labels[i].image, image_labels[i].label);
-    if (eval.Run() != kTfLiteOk) return absl::nullopt;
+    if (eval.Run() != kTfLiteOk) {
+      TFLITE_LOG(INFO) << "sampleid: " << image_labels[i].image << ", result=false";
+      return absl::nullopt;
+    } else {
+      TFLITE_LOG(INFO) << "sampleid: " << image_labels[i].image << ", result=true";
+    }
+    if (debug_mode_) {
+      std::string label = image_labels[i].label.substr(image_labels[i].label.find(" ")+1);
+      int in_label = stoi(label);
+      in_label++;
+      OutputResultItem(eval.LatestMetrics(), image_labels[i].image, model_labels[in_label]);
+    }
+    const auto& inference_latency = eval.LatestMetrics().process_metrics().image_classification_metrics().inference_latency();
+    infer_time.at(i) = inference_latency.last_us() * 0.001;
+    TFLITE_LOG(INFO) << "latency_case" << (i+1) << "_latency: " << infer_time.at(i) << " ms";
   }
-
   const auto latest_metrics = eval.LatestMetrics();
-  OutputResult(latest_metrics);
+  OutputResult(latest_metrics, infer_time);
+  TFLITE_LOG(INFO) << "Test end";
   return absl::make_optional(latest_metrics);
 }
 
-void ImagenetClassification::OutputResult(
-    const EvaluationStageMetrics& latest_metrics) const {
+void ImagenetClassification::OutputResultItem(
+  const EvaluationStageMetrics& latest_metrics, std::string image_name, std::string label) const {
   if (!output_file_path_.empty()) {
     std::ofstream metrics_ofile;
     metrics_ofile.open(output_file_path_, std::ios::out);
     metrics_ofile << latest_metrics.SerializeAsString();
     metrics_ofile.close();
   }
-
-  TFLITE_LOG(INFO) << "Num evaluation runs: " << latest_metrics.num_runs();
   const auto& metrics =
       latest_metrics.process_metrics().image_classification_metrics();
-  const auto& preprocessing_latency = metrics.pre_processing_latency();
-  TFLITE_LOG(INFO) << "Preprocessing latency: avg="
-                   << preprocessing_latency.avg_us() << "(us), std_dev="
-                   << preprocessing_latency.std_deviation_us() << "(us)";
-  const auto& inference_latency = metrics.inference_latency();
-  TFLITE_LOG(INFO) << "Inference latency: avg=" << inference_latency.avg_us()
-                   << "(us), std_dev=" << inference_latency.std_deviation_us()
-                   << "(us)";
   const auto& accuracy_metrics = metrics.topk_accuracy_metrics();
+  int rst = 0;
+  static int right = 0;
+  int num = latest_metrics.num_runs();
+  double diff = (double)(1 + right) / (double)num;
+  for (int i = 0; i < accuracy_metrics.topk_accuracies_size(); ++i) {
+    if (accuracy_metrics.topk_accuracies(i) >= diff) {
+      right++;
+      rst = i + 1;
+      break;
+    }
+  }
+  if (rst > 0) {
+      TFLITE_LOG(INFO) << "sampleid: " << image_name << ", top-k is " << rst << ", result is " << label;
+  } else {
+      TFLITE_LOG(INFO) << "sampleid: " << image_name << ", predict error";
+  }
+ }
+
+void ImagenetClassification::OutputResult(
+    const EvaluationStageMetrics& latest_metrics, std::vector<float>& infer_time) const {
+  if (!output_file_path_.empty()) {
+    std::ofstream metrics_ofile;
+    metrics_ofile.open(output_file_path_, std::ios::out);
+    metrics_ofile << latest_metrics.SerializeAsString();
+    metrics_ofile.close();
+  }
+  const auto& metrics =
+        latest_metrics.process_metrics().image_classification_metrics();
+  if (debug_mode_) {
+    TFLITE_LOG(INFO) << "Num evaluation runs: " << latest_metrics.num_runs();
+    const auto& preprocessing_latency = metrics.pre_processing_latency();
+    TFLITE_LOG(INFO) << "Preprocessing latency: avg="
+                    << preprocessing_latency.avg_us() / 1000.0  << "(ms), std_dev="
+                    << preprocessing_latency.std_deviation_us() / 1000.0 << "(ms)";
+  }
+    const auto& inference_latency = metrics.inference_latency();
+  std::sort(infer_time.begin(), infer_time.end(), std::greater<float>());
+  TFLITE_LOG(INFO) << "90th_percentile_latency: "
+                   << infer_time.at(90 * (latest_metrics.num_runs() - 1) / 100)
+                   << "ms, min_latency: " << inference_latency.min_us() * 0.001
+                   << "ms, max_latency: " << inference_latency.max_us() * 0.001
+                   << "ms";
+  const auto& accuracy_metrics = metrics.topk_accuracy_metrics();
+  TFLITE_LOG(INFO) << "total_accuracy: ";
   for (int i = 0; i < accuracy_metrics.topk_accuracies_size(); ++i) {
     TFLITE_LOG(INFO) << "Top-" << i + 1
                      << " Accuracy: " << accuracy_metrics.topk_accuracies(i);
