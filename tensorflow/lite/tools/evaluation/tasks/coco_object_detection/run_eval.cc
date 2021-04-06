@@ -253,6 +253,7 @@ absl::optional<EvaluationStageMetrics> CocoObjectDetection::RunImpl() {
     return absl::nullopt;
   }
 
+  TFLITE_LOG(INFO) << "test_end";
   return absl::make_optional(latest_metrics);
 }
 
@@ -278,7 +279,7 @@ void CocoObjectDetection::OutputResult(
   std::sort(infer_time.begin(), infer_time.end(), std::greater<float>());
   const auto& inference_latency = object_detection_metrics.inference_latency();
   TFLITE_LOG(INFO) << "90th_percentile_latency: "
-	           << infer_time.at(90 * (latest_metrics.num_runs() - 1) / 100)
+	           << infer_time.at(static_cast<size_t>(90 / 100 * latest_metrics.num_runs() + 1))
 		   << "ms, min_latency: " << inference_latency.min_us() * 0.001
                    << "ms, max_latency: " << inference_latency.max_us() * 0.001
                    << "ms";
@@ -295,7 +296,6 @@ void CocoObjectDetection::OutputResult(
   }
   TFLITE_LOG(INFO) << "total_accuracy: "
                    << precision_metrics.overall_mean_average_precision();
-  TFLITE_LOG(INFO) << "test_end";
 }
 
 std::unique_ptr<TaskExecutor> CreateTaskExecutor() {
