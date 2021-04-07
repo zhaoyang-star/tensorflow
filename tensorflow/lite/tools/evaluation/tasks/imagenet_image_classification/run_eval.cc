@@ -62,7 +62,7 @@ class ImagenetClassification : public TaskExecutor {
 
  private:
   void OutputResult(const EvaluationStageMetrics& latest_metrics, std::vector<float>& infer_time) const;
-  void OutputResultItem(const EvaluationStageMetrics& latest_metrics, std::string image_name, std::string label) const;
+  void OutputResultItem(const EvaluationStageMetrics& latest_metrics, const std::string image_name, const std::string label) const;
   std::string model_file_path_;
   std::string ground_truth_images_path_;
   std::string ground_truth_labels_path_;
@@ -207,7 +207,7 @@ absl::optional<EvaluationStageMetrics> ImagenetClassification::RunImpl() {
 }
 
 void ImagenetClassification::OutputResultItem(
-  const EvaluationStageMetrics& latest_metrics, std::string image_name, std::string label) const {
+  const EvaluationStageMetrics& latest_metrics, const std::string image_name, const std::string label) const {
   if (!output_file_path_.empty()) {
     std::ofstream metrics_ofile;
     metrics_ofile.open(output_file_path_, std::ios::out);
