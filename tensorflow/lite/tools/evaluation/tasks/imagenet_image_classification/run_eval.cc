@@ -123,11 +123,15 @@ std::vector<Flag> ImagenetClassification::GetFlags() {
 
 absl::optional<EvaluationStageMetrics> ImagenetClassification::RunImpl() {
   // Process images in filename-sorted order.
+  std::string image_md5 = GetMD5(ground_truth_images_path_);
+  TFLITE_LOG(INFO) << "load ground_truth_images, checksum: " << md5;
   std::vector<std::string> image_files, ground_truth_image_labels;
   if (GetSortedFileNames(StripTrailingSlashes(ground_truth_images_path_),
                          &image_files) != kTfLiteOk) {
     return absl::nullopt;
   }
+  std::string label_md5 = GetMD5(ground_truth_labels_path_);
+  TFLITE_LOG(INFO) << "load ground_truth_labels, checksum: " << label_md5;
   if (!ReadFileLines(ground_truth_labels_path_, &ground_truth_image_labels)) {
     TFLITE_LOG(ERROR) << "Could not read ground truth labels file";
     return absl::nullopt;
@@ -249,9 +253,8 @@ void ImagenetClassification::OutputResult(
                     << preprocessing_latency.std_deviation_us() / 1000.0 << "(ms)";
   }
     const auto& inference_latency = metrics.inference_latency();
-  std::sort(infer_time.begin(), infer_time.end(), std::greater<float>());
   TFLITE_LOG(INFO) << "90th_percentile_latency: "
-                   << infer_time.at(90 * (latest_metrics.num_runs() - 1) / 100)
+                   << GetPercentile(infer_time, 90)
                    << "ms, min_latency: " << inference_latency.min_us() * 0.001
                    << "ms, max_latency: " << inference_latency.max_us() * 0.001
                    << "ms";
