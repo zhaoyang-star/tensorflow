@@ -32,7 +32,7 @@ namespace tflite {
 namespace evaluation {
 
 constexpr char kModelFileFlag[] = "model_file";
-constexpr char kGroundTruthImagesPathFlag[] = "ground_truth_images_path";
+constexpr char kGroundTruthImagesFlag[] = "ground_truth_images";
 constexpr char kModelOutputLabelsFlag[] = "model_output_labels";
 constexpr char kOutputFilePathFlag[] = "output_file_path";
 constexpr char kGroundTruthProtoFileFlag[] = "ground_truth_proto";
@@ -61,7 +61,7 @@ class CocoObjectDetection : public TaskExecutor {
   void OutputResult(const EvaluationStageMetrics& latest_metrics, std::vector<float>& infer_time) const;
   std::string model_file_path_;
   std::string model_output_labels_path_;
-  std::string ground_truth_images_path_;
+  std::string ground_truth_images_file_;
   std::string ground_truth_proto_file_;
   std::string output_file_path_;
   bool debug_mode_;
@@ -80,8 +80,8 @@ std::vector<Flag> CocoObjectDetection::GetFlags() {
           "where each line contains a class detected by the model in correct "
           "order, starting from background."),
       tflite::Flag::CreateFlag(
-          kGroundTruthImagesPathFlag, &ground_truth_images_path_,
-          "Path to ground truth images. These will be evaluated in "
+          kGroundTruthImagesFlag, &ground_truth_images_file_,
+          "Zip file to ground truth images. These will be evaluated in "
           "alphabetical order of filenames"),
       tflite::Flag::CreateFlag(kGroundTruthProtoFileFlag,
                                &ground_truth_proto_file_,
@@ -110,12 +110,12 @@ std::vector<Flag> CocoObjectDetection::GetFlags() {
 
 absl::optional<EvaluationStageMetrics> CocoObjectDetection::RunImpl() {
   // Process images in filename-sorted order.
-  auto dir = StripTrailingSlashes(ground_truth_images_path_);
+  auto zipfile = StripTrailingSlashes(ground_truth_images_file_);
 
-  std::string md5 = GetMD5(dir);
+  std::string md5 = GetMD5(zipfile);
   TFLITE_LOG(INFO) << "load_data, checksum: " << md5;
 
-  auto image_dir = GetGroundTruthImagePath(dir);
+  auto image_dir = GetGroundTruthImagePath(zipfile);
 
   std::vector<std::string> image_paths;
   if (GetSortedFileNames(image_dir,

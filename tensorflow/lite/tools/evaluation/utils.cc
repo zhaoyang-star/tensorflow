@@ -114,7 +114,7 @@ std::string GetMD5(const std::string& dir) {
 
 std::string GetGroundTruthImagePath(const std::string& dir) {
   std::string path = GetPathFromPath(dir);
-  std::string cmd = "unzip " + dir + " -d " + path + " | tail -1 | awk '{print $2}'";
+  std::string cmd = "unzip -o " + dir + " -d " + path + " | tail -1 | awk '{print $2}'";
   FILE* pipe = popen(cmd.c_str(), "r");
   if (!pipe) {
     TFLITE_LOG(ERROR) << "Could not unzip ground truth images.";
