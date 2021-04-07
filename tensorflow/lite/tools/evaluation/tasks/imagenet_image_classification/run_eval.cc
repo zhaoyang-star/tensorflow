@@ -62,7 +62,7 @@ class ImagenetClassification : public TaskExecutor {
 
  private:
   void OutputResult(const EvaluationStageMetrics& latest_metrics, std::vector<float>& infer_time) const;
-  void OutputResultItem(const EvaluationStageMetrics& latest_metrics, std::string image_name, std::string label) const;
+  void OutputResultItem(const EvaluationStageMetrics& latest_metrics, const std::string image_name, const std::string label) const;
   std::string model_file_path_;
   std::string ground_truth_images_path_;
   std::string ground_truth_labels_path_;
@@ -126,12 +126,13 @@ absl::optional<EvaluationStageMetrics> ImagenetClassification::RunImpl() {
   std::string image_md5 = GetMD5(ground_truth_images_path_);
   TFLITE_LOG(INFO) << "load ground_truth_images, checksum: " << md5;
   std::vector<std::string> image_files, ground_truth_image_labels;
-  if (GetSortedFileNames(StripTrailingSlashes(ground_truth_images_path_),
+  std::string image_path = ground_truth_images_path_.substr(0, ground_truth_images_path_.find("."));
+  image_path += "/val_list_1k";
+  if (GetSortedFileNames(StripTrailingSlashes(image_path),
                          &image_files) != kTfLiteOk) {
     return absl::nullopt;
   }
-  std::string label_md5 = GetMD5(ground_truth_labels_path_);
-  TFLITE_LOG(INFO) << "load ground_truth_labels, checksum: " << label_md5;
+
   if (!ReadFileLines(ground_truth_labels_path_, &ground_truth_image_labels)) {
     TFLITE_LOG(ERROR) << "Could not read ground truth labels file";
     return absl::nullopt;
@@ -207,7 +208,7 @@ absl::optional<EvaluationStageMetrics> ImagenetClassification::RunImpl() {
 }
 
 void ImagenetClassification::OutputResultItem(
-  const EvaluationStageMetrics& latest_metrics, std::string image_name, std::string label) const {
+  const EvaluationStageMetrics& latest_metrics, const std::string image_name, const std::string label) const {
   if (!output_file_path_.empty()) {
     std::ofstream metrics_ofile;
     metrics_ofile.open(output_file_path_, std::ios::out);
@@ -245,8 +246,8 @@ void ImagenetClassification::OutputResult(
   }
   const auto& metrics =
         latest_metrics.process_metrics().image_classification_metrics();
+  TFLITE_LOG(INFO) << "Num evaluation runs: " << latest_metrics.num_runs();
   if (debug_mode_) {
-    TFLITE_LOG(INFO) << "Num evaluation runs: " << latest_metrics.num_runs();
     const auto& preprocessing_latency = metrics.pre_processing_latency();
     TFLITE_LOG(INFO) << "Preprocessing latency: avg="
                     << preprocessing_latency.avg_us() / 1000.0  << "(ms), std_dev="
