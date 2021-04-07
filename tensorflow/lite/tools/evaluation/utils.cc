@@ -115,7 +115,17 @@ std::string GetMD5(const std::string& dir) {
 
 std::string GetGroundTruthImagePath(const std::string& dir) {
   std::string path = GetPathFromPath(dir);
-  std::string cmd = "tar -xvf " + dir + " -C " + path + " --no-same-owner | head -1";
+  std::string cmd = "tar -xvf " + dir + " -C " + path + " --no-same-owner";
+/*
+  FILE* pipe = popen(cmd.c_str(), "r");
+  if (!pipe) {
+    TFLITE_LOG(ERROR) << "Could not uncompress ground truth images.";
+  }
+  pclose(pipe);
+*/
+  system(cmd.c_str());
+
+  cmd = "tar -tf " + dir + " | head -1";
   FILE* pipe = popen(cmd.c_str(), "r");
   if (!pipe) {
     TFLITE_LOG(ERROR) << "Could not uncompress ground truth images.";
