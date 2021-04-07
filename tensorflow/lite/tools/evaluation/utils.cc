@@ -115,15 +115,18 @@ std::string GetMD5(const std::string& dir) {
 
 std::string GetGroundTruthImagePath(const std::string& dir) {
   std::string path = GetPathFromPath(dir);
-  std::string cmd = "unzip -o " + dir + " -d " + path + " | tail -1 | awk '{print $2}'";
+  std::string cmd = "tar -xvf " + dir + " -C " + path + " --no-same-owner | head -1";
   FILE* pipe = popen(cmd.c_str(), "r");
   if (!pipe) {
-    TFLITE_LOG(ERROR) << "Could not unzip ground truth images.";
+    TFLITE_LOG(ERROR) << "Could not uncompress ground truth images.";
   }
   char ins_path[1024];
   fgets(ins_path, sizeof(ins_path), pipe);
   pclose(pipe);
-  return GetPathFromPath(std::string(ins_path));
+
+  auto ret = path + std::string(ins_path);
+  ret = ret.substr(0, ret.find_last_of("/"));
+  return ret;
 }
 
 // same as numpy.percentile()
