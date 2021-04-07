@@ -57,6 +57,7 @@ bool ReadFileLines(const std::string& file_path,
   while (std::getline(stream, line)) {
     lines_output->push_back(line);
   }
+  std::sort(lines_output->begin(), lines_output->end());
   return true;
 }
 

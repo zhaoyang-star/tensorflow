@@ -50,7 +50,7 @@ TfLiteStatus TopkAccuracyEvalStage::Init() {
   }
   num_total_labels_ = ground_truth_labels_.size();
   if (params.k() > num_total_labels_) {
-    LOG(ERROR) << "k is too large";
+    LOG(ERROR) << "k is too large, k: " << params.k() << ", ground_truth_labels: " << ground_truth_labels_.size();
     return kTfLiteError;
   }
 
@@ -122,8 +122,11 @@ EvaluationStageMetrics TopkAccuracyEvalStage::LatestMetrics() {
 }
 
 void TopkAccuracyEvalStage::UpdateCounts(const std::vector<int>& topk_indices) {
+  std::string label = ground_truth_label_->substr(ground_truth_label_->find(" ")+1);
+  int in_label = stoi(label);
+  in_label++;
   for (size_t i = 0; i < topk_indices.size(); ++i) {
-    if (*ground_truth_label_ == ground_truth_labels_[topk_indices[i]]) {
+    if (in_label == topk_indices[i]) {
       for (size_t j = i; j < topk_indices.size(); j++) {
         accuracy_counts_[j] += 1;
       }
