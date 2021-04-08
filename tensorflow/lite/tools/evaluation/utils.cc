@@ -115,14 +115,10 @@ std::string GetMD5(const std::string& dir) {
 
 std::string GetGroundTruthImagePath(const std::string& dir) {
   std::string path = GetPathFromPath(dir);
-  std::string cmd = "tar -xvf " + dir + " -C " + path + " --no-same-owner";
-/*
-  FILE* pipe = popen(cmd.c_str(), "r");
-  if (!pipe) {
-    TFLITE_LOG(ERROR) << "Could not uncompress ground truth images.";
-  }
-  pclose(pipe);
-*/
+  std::string cmd = "tar -xf " + dir + " -C " + path + " --no-same-owner";
+  // We don't use popen because `tar -xf` may last several seconds. `fgets` will return soon
+  // and `pclose` will be executed before all files have been extracted from .tar file.
+  // But `system` will normally sync until the shell command finish.`
   system(cmd.c_str());
 
   cmd = "tar -tf " + dir + " | head -1";
