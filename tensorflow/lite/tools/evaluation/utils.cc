@@ -107,7 +107,7 @@ std::string GetMD5(const std::string& dir) {
   if (!pipe) {
     TFLITE_LOG(ERROR) << "Could not get md5 of ground truth images.";
   }
-  char md5[32];
+  char md5[33];
   fgets(md5, sizeof(md5), pipe);
   pclose(pipe);
   return std::string(md5);
