@@ -107,7 +107,7 @@ std::string GetMD5(const std::string& dir) {
   if (!pipe) {
     TFLITE_LOG(ERROR) << "Could not get md5 of ground truth images.";
   }
-  char md5[32];
+  char md5[33];
   fgets(md5, sizeof(md5), pipe);
   pclose(pipe);
   return std::string(md5);
@@ -115,15 +115,24 @@ std::string GetMD5(const std::string& dir) {
 
 std::string GetGroundTruthImagePath(const std::string& dir) {
   std::string path = GetPathFromPath(dir);
-  std::string cmd = "unzip -o " + dir + " -d " + path + " | tail -1 | awk '{print $2}'";
+  std::string cmd = "tar -xf " + dir + " -C " + path + " --no-same-owner";
+  // We don't use popen because `tar -xf` may last several seconds. `fgets` will return soon
+  // and `pclose` will be executed before all files have been extracted from .tar file.
+  // But `system` will normally sync until the shell command finish.`
+  system(cmd.c_str());
+
+  cmd = "tar -tf " + dir + " | head -1";
   FILE* pipe = popen(cmd.c_str(), "r");
   if (!pipe) {
-    TFLITE_LOG(ERROR) << "Could not unzip ground truth images.";
+    TFLITE_LOG(ERROR) << "Could not uncompress ground truth images.";
   }
   char ins_path[1024];
   fgets(ins_path, sizeof(ins_path), pipe);
   pclose(pipe);
-  return GetPathFromPath(std::string(ins_path));
+
+  auto ret = path + std::string(ins_path);
+  ret = ret.substr(0, ret.find_last_of("/"));
+  return ret;
 }
 
 // same as numpy.percentile()

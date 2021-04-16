@@ -110,12 +110,12 @@ std::vector<Flag> CocoObjectDetection::GetFlags() {
 
 absl::optional<EvaluationStageMetrics> CocoObjectDetection::RunImpl() {
   // Process images in filename-sorted order.
-  auto zipfile = StripTrailingSlashes(ground_truth_images_file_);
+  auto tarfile = StripTrailingSlashes(ground_truth_images_file_);
 
-  std::string md5 = GetMD5(zipfile);
+  std::string md5 = GetMD5(tarfile);
   TFLITE_LOG(INFO) << "load_data, checksum: " << md5;
 
-  auto image_dir = GetGroundTruthImagePath(zipfile);
+  auto image_dir = GetGroundTruthImagePath(tarfile);
 
   std::vector<std::string> image_paths;
   if (GetSortedFileNames(image_dir,
