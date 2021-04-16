@@ -124,7 +124,7 @@ std::vector<Flag> ImagenetClassification::GetFlags() {
 absl::optional<EvaluationStageMetrics> ImagenetClassification::RunImpl() {
   // Process images in filename-sorted order.
   std::string image_md5 = GetMD5(ground_truth_images_path_);
-  TFLITE_LOG(INFO) << "load ground_truth_images, checksum: " << md5;
+  TFLITE_LOG(INFO) << "load ground_truth_images, checksum: " << image_md5;
   std::vector<std::string> image_files, ground_truth_image_labels;
   std::string image_path = ground_truth_images_path_.substr(0, ground_truth_images_path_.find("."));
   image_path += "/val_list_1k";
